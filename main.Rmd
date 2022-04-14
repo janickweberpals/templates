@@ -105,7 +105,7 @@ labelled::var_label(df) <- vars_labels
 
 # this can also be converted into a mapping df
 # TO DO
-label_mapping <- do.call(rbind, vars_labels)
+# label_mapping <- do.call(rbind, vars_labels)
 ```
 
 # Table 1
@@ -151,7 +151,7 @@ smd_plot <- data.frame(variable  = rownames(tableone::ExtractSmd(table1)),
   dplyr::mutate(vars_labels = factor(variable, levels = smd)) %>% 
   dplyr::filter(variable != "ageatadvanceddiagnosisdate") %>% 
   ggplot2::ggplot(ggplot2::aes(x = variable, y = smd)) +
-  ggplot2::geom_point(size = 3) +
+  ggplot2::geom_point(size = 1.5) +
   ggplot2::geom_hline(yintercept = 0.1, color = "red", linetype = "dashed", size = 0.25) +
   ggplot2::coord_flip() +
   ggplot2::labs(y = "SMD", 
