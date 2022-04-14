@@ -1,0 +1,226 @@
+---
+title: "Title"
+author: "Janick Weberpals"
+date: "Last compiled `r Sys.time()` by `r Sys.info()[['user']]`"
+output:
+    html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    number_sections: yes
+    code_folding: show
+    classoption: landscape
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+  word_document:
+    toc: yes
+    toc_depth: '3'
+    always_allow_html: true
+---
+
+```{r setup, include = FALSE}
+# setup
+suppressPackageStartupMessages(library(tidyverse))
+
+# path where publication-ready outputs are collected
+path.out <- here::here("output")
+
+# global gt summary settings
+options(gtsummary.as_gt.addl_cmds = "gt::tab_options(table.font.size = 'medium', data_row.padding = gt::px(1))")
+
+# set chunk default options
+knitr::opts_chunk$set(dpi = 150, 
+                      fig.align = "left")
+```
+
+# Glossary
+
+| Col1 | Col2 | Col3 |
+|------|------|------|
+|      |      |      |
+|      |      |      |
+|      |      |      |
+
+`r kableExtra::text_spec("CAVE: This script is still in development statusand may contain bugs!", color = "red")`
+
+# Include graphic
+
+Show a graphic here
+```{r}
+knitr::include_graphics(here::here(""))
+```
+
+# Child scripts
+```{r, child = here::here()}
+# if you want to include/compile another Markdown, you can include the child script here
+```
+
+# Data formatting
+```{r pull-data}
+df <- survival::lung %>% 
+  dplyr::mutate(dplyr::across(c(ph.ecog), ~as.factor(.x)))
+```
+
+```{r factor-vars}
+df <- df %>% 
+  dplyr::mutate(sex2 = dplyr::case_when(
+    sex == 1 ~ "Male",
+    sex == 2 ~ "Female",
+    TRUE ~ NA_character_)
+    ) %>% 
+  # ordered factor
+  dplyr::mutate(sex2 = factor(sex2, levels = c("Male", "Female"))) %>% 
+  # define reference level manually
+  dplyr::mutate(sex2 = stats::relevel(factor(sex2, levels = c("Male", "Female")), ref = "Male"))
+```
+
+```{r cross-checks}
+table(df$sex, df$sex2, useNA = "ifany", dnn = c("original", "recoded"))
+```
+
+# Data table
+```{r data-table}
+source(here::here("functions", "_default_DT.R"))
+df %>% 
+  default_DT()
+```
+
+# Label vars
+```{r label-vars}
+vars_labels <- list(
+  inst = "Institution code",
+  time = "Survival time in days",
+  status = "Censoring status",
+  age = "Age in years",
+  sex2 = "Sex",
+  ph.ecog = "ECOG",
+  ph.karno = "Karnofsky (physician)",
+  pat.karno = "Karnofsky (patient)",
+  meal.cal = "Calories consumed at meals",
+  wt.loss = "Weight loss (pounds)"
+)
+
+labelled::var_label(df) <- vars_labels
+
+# this can also be converted into a mapping df
+# TO DO
+label_mapping <- do.call(rbind, vars_labels)
+```
+
+# Table 1
+```{r tableone}
+table1 <- tableone::CreateTableOne(
+  data = df,
+  vars = names(df)[!names(df) %in% c("sex", "sex2")],
+  strata = "sex2",
+  includeNA = TRUE,
+  addOverall = TRUE
+)
+
+table1print <- print(
+  table1,
+  smd = TRUE,
+  test = FALSE,
+  nonnormal = df %>% dplyr::select_if(is.numeric) %>% names(),
+  varLabels = TRUE,
+  printToggle = FALSE
+)
+```
+
+```{r table1-output}
+source(here::here("functions", "_flextable_default.R"))
+
+table1final <- table1print %>% 
+  flextable_default()
+
+# define word specifications for table 1
+table1_specs <- officer::prop_section(
+  page_size = officer::page_size(orient = "landscape"), type = "continuous"
+  )
+
+table1final %>% 
+  flextable::save_as_docx(path = paste0(path.out,"/table1.docx"), pr_section = table1_specs)
+```
+
+# SMD plot
+
+```{r}
+smd_plot <- data.frame(variable  = rownames(tableone::ExtractSmd(table1)),
+                       smd = as.numeric(tableone::ExtractSmd(table1))) %>% 
+  dplyr::mutate(vars_labels = factor(variable, levels = smd)) %>% 
+  dplyr::filter(variable != "ageatadvanceddiagnosisdate") %>% 
+  ggplot2::ggplot(ggplot2::aes(x = variable, y = smd)) +
+  ggplot2::geom_point(size = 3) +
+  ggplot2::geom_hline(yintercept = 0.1, color = "red", linetype = "dashed", size = 0.25) +
+  ggplot2::coord_flip() +
+  ggplot2::labs(y = "SMD", 
+                x = "Patient characteristics", 
+                title = "Balance in patient characteristics across Hgb cohorts") +
+  ggplot2::theme_bw() + 
+  ggplot2::theme(legend.key = element_blank())
+```
+
+
+# Regression tables
+```{r regression}
+covariates <- names(df)[!names(df) %in% c("sex", "time", "status")] 
+cox_formula <- as.formula(paste0("survival::Surv(time, status) ~ ", paste(covariates, collapse = "+")))
+cox_object <- survival::coxph(cox_formula, data = df)
+```
+
+```{r regression-output-option-1}
+cox_out1 <- cox_object %>% 
+  broom::tidy(exponentiate = TRUE, conf.int = TRUE) %>% 
+  dplyr::mutate(conf.int = paste0(formatC(conf.low, format="f", 2), 
+                                  "-",
+                                  formatC(conf.high, format="f", 2))) %>% 
+  dplyr::mutate(summary_estimate = paste0(formatC(estimate, format="f", 2), 
+                                  " (",
+                                  conf.int,
+                                  ")")) %>% 
+  dplyr::select(term, estimate, conf.int, "HR (95% CI)" = summary_estimate) %>% 
+  flextable_default()
+
+conf.int
+```
+
+```{r regression-output-option-2}
+cox_out2 <- cox_object %>% 
+  gtsummary::tbl_regression(exponentiate = TRUE)
+  # more can be optionally added such as
+  # gtsummary::add_n() %>%
+  # gtsummary::add_nevent()
+
+# save as a figure
+gt::gtsave(gtsummary::as_gt(cox_out2),
+           file = file.path(here::here("output", "cox_example.png")))
+
+# can also be saved as a more flexible flextable
+cox_out2 %>% 
+  gtsummary::as_flex_table() %>% 
+  flextable::height(height = 0.1, part = "body") %>% 
+  flextable::save_as_docx(path = here::here("output", "cox_example.docx"))
+
+cox_out2
+```
+
+# Session info {.tabset .tabset-pills}
+
+## Loaded packages
+
+```{r, class.source = 'fold-hide'}
+pander::pander(subset(data.frame(sessioninfo::package_info()), attached==TRUE, c(package, loadedversion)))
+```
+
+## Session info
+
+```{r, class.source = 'fold-hide'}
+pander::pander(sessionInfo())
+```
+
+## Repositories
+
+```{r, class.source = 'fold-hide'}
+pander::pander(options('repos'))
+```
