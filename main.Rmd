@@ -222,6 +222,56 @@ names(cont_plot) <- cont_covar
 cont_plot
 ```
 
+## tsne
+
+t-SNE is a very powerful technique that can be used for visualizing (looking for patterns) in multi-dimensional data.
+
+The `Rtsne` package can be used as shown below. The perplexity parameter is crucial for t-SNE to work correctly – this parameter determines how the local and global aspects of the data are balanced. A more detailed explanation on this parameter and other aspects of t-SNE can be found in [this article](https://distill.pub/2016/misread-tsne/), but a perplexity value between 30 and 50 is recommended.
+
+```{r}
+# Prepare modeling cohort (let's use the same as in logistic, just continous/one-hot-encoded)
+tsne_df <- df %>%
+
+  # select features
+  dplyr::select(-c(sex, exposure)) %>% 
+  
+  # convert to factors and replace NA with "Unknwon" missingness indicator
+  dplyr::mutate(across(where(~ is.character(.x) | is.factor(.x)),
+                       ~forcats::fct_explicit_na(.x, na_level = "Unknown"))) %>% 
+  
+  # for the sake of exploration we just do mediocre median imputation
+  dplyr::mutate(across(where(is.numeric), ~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x))) %>% 
+  
+  # one hot encode
+  fastDummies::dummy_cols(remove_first_dummy = TRUE, remove_selected_columns = TRUE)
+
+set.seed(42)  
+tsne_fit <- Rtsne::Rtsne(as.matrix(tsne_df), 
+                         check_duplicates = FALSE, 
+                         pca = TRUE, 
+                         perplexity = 40, 
+                         theta = 0.5, 
+                         dims = 2)
+
+## getting the two dimension matrix
+tsne_results <- as.data.frame(tsne_fit$Y)  
+
+tsne_results <- tsne_results %>% 
+  dplyr::bind_cols(label = df$exposure)
+
+tsne_plot <- tsne_results %>% 
+  ggplot2::ggplot(ggplot2::aes(x = V1, y = V2, color = label)) +  
+  ggplot2::geom_point(size = 1) +
+  ggplot2::labs(x = "Dimension 1",
+                y = "Dimension 2",
+                color = "Exposure") +
+  ggplot2::theme_bw() +
+  ggplot2::theme(axis.text.x = element_blank(),
+                 axis.text.y = element_blank(),
+                 legend.position="top")
+```
+
+
 # Inference
 
 ## Imputation model
@@ -282,21 +332,22 @@ cox_out2
 
 ## Propensity score models
 
+The following chapter is just an example of what could be done. A great tutorial on propensity score matching methodologies and effect estimation after matching is provided by [Noah Greifer](https://cran.r-project.org/web/packages/MatchIt/vignettes/estimating-effects.html).
+
 ### Manual PS estimation
 ```{r}
 covars <- c("age", "sex2", "ph.ecog", "ph.karno", "pat.karno", "meal.cal", "wt.loss")
 
 # Fit logistic model (exposure model)
-ps_model <- glm(formula = as.formula(paste0("exposure ~ ", 
-                                            paste(covars, collapse = "+"))),
-                family = binomial(link="logit"),
-                data = dfImp)
+ps_model <- stats::glm(formula = as.formula(paste0("exposure ~ ", paste(covars, collapse = "+"))),
+                       family = binomial(link="logit"),
+                       data = dfImp)
 
 # Obtain the propensity score for each observation
 ps_manual <- predict(ps_model, dfImp, type="response")
 ```
 
-## Caliper matching using `MatchIt` {.tabset}
+## Matching using `MatchIt` {.tabset .tabset-pills}
 
 We match on 0.2 sd of the PS logit ([Austin PC, 2011](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3120982/))
 ```{r}
@@ -310,12 +361,12 @@ matching_out <- MatchIt::matchit(as.formula(paste0("exposure ~ ",
 ```
 
 ### Covariate balance
-```{r}
+```{r ps-covariate-balance}
 plot(summary(matching_out))
 ```
 
 ### PS balance
-```{r}
+```{r ps-overlap}
 # extract all
 all_out_df <- MatchIt::match.data(matching_out, 
                                   distance = "ps", 
@@ -343,17 +394,19 @@ ps_overlap
 
 ### Outcome model
 
-\textcolor{red}{TO DO: Account for clustering in matched pairs for correct variance estimation}
-
 ```{r}
 cox_formula <- as.formula(survival::Surv(time, status) ~ exposure)
-cox_object <- survival::coxph(cox_formula, data = matched_out_df, cluster = subclass)
+cox_object <- survival::coxph(cox_formula, 
+                              data = matched_out_df, 
+                              robust = TRUE, 
+                              weights = weights, 
+                              cluster = subclass)
 
 cox_object %>% 
   gtsummary::tbl_regression(exponentiate = TRUE)
 ```
 
-## PS weighting using `WeightIt` {.tabset}
+## Weighting using `WeightIt` {.tabset}
 
 \textcolor{red}{TO DO: Implement weighting and some more PS methods}
 
