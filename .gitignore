@@ -42,3 +42,7 @@ vignettes/*.pdf
 
 # r package files
 .rpkg
+
+# output example
+output/*.docx
+output/*.png
