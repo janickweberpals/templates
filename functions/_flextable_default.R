@@ -7,7 +7,7 @@ flextable_default <- function(data = NULL, # df, tibble or table1 object
   if(any(class(data) %in% "matrix")){ # for tableone objects
     
     data_in <- data %>% 
-      as.data.frame() %>% 
+      as.data.frame(make.names = FALSE) %>%  
       tibble::rownames_to_column(var = "Characteristics") %>% 
       dplyr::mutate(Characteristics = stringr::str_remove_all(Characteristics, " \\(median \\[IQR\\]\\)"))
     
@@ -26,7 +26,8 @@ flextable_default <- function(data = NULL, # df, tibble or table1 object
     flextable::autofit() %>% 
     flextable::bold(part = "header") %>% 
     flextable::height(height = 0.1, part = "body") %>% 
-    flextable::align(part = "all", align = "left")
+    flextable::align(part = "all", align = "left") %>% 
+    flextable::bold(part = "header")
   
   if(exists("indent_vec")){
     

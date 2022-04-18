@@ -5,7 +5,9 @@ required_packages <- c("tidyverse",
                        "tableone",
                        "flextable",
                        "kableExtra",
-                       "gtsummary"
+                       "gtsummary",
+                       "MatchIt",
+                       "WeightIt"
                        )
 
 for(i in required_packages){

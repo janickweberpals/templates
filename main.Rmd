@@ -10,6 +10,7 @@ output:
     number_sections: yes
     code_folding: show
     classoption: landscape
+    keep_md: true
   pdf_document:
     toc: yes
     toc_depth: '3'
@@ -28,6 +29,17 @@ path.out <- here::here("output")
 
 # global gt summary settings
 options(gtsummary.as_gt.addl_cmds = "gt::tab_options(table.font.size = 'medium', data_row.padding = gt::px(1))")
+
+# define word specifications for table exports
+landscape_specs <- officer::prop_section(
+  page_size = officer::page_size(orient = "landscape"), 
+  type = "continuous"
+  )
+
+portrait_specs <- officer::prop_section(
+  page_size = officer::page_size(orient = "portrait"), 
+  type = "continuous"
+  )
 
 # set chunk default options
 knitr::opts_chunk$set(dpi = 150, 
@@ -56,7 +68,9 @@ knitr::include_graphics(here::here(""))
 # if you want to include/compile another Markdown, you can include the child script here
 ```
 
-# Data formatting
+# Data preparation 
+
+## Data formatting
 ```{r pull-data}
 df <- survival::lung %>% 
   dplyr::mutate(dplyr::across(c(ph.ecog), ~as.factor(.x)))
@@ -86,7 +100,7 @@ df %>%
   default_DT()
 ```
 
-# Label vars
+## Label vars
 ```{r label-vars}
 vars_labels <- list(
   inst = "Institution code",
@@ -101,27 +115,46 @@ vars_labels <- list(
   wt.loss = "Weight loss (pounds)"
 )
 
+# reset old labelling (optional)
+df %>% labelled::remove_labels()
+
+# add new labeling
 labelled::var_label(df) <- vars_labels
 
 # this can also be converted into a mapping df
-# TO DO
-# label_mapping <- do.call(rbind, vars_labels)
+var_label_mapping <- plyr::ldply(vars_labels, data.frame)  
+colnames(var_label_mapping) <- c("variable", "label")
 ```
 
-# Table 1
+# Exploration and descriptives
+
+## Table 1
+
+To compare the distribution of patient characteristics across strata, the [tableone](https://cran.r-project.org/web/packages/tableone/) package is used.
+
+The hypothesis test functions used by default are chisq.test() for categorical variables (with continuity correction) and oneway.test() for continous variables (with equal variance assumption, i.e., regular ANOVA). Two-group ANOVA is equivalent of t-test.
+
+In case of non-normally distributed continuous variables (*nonnormal*), a kruskal.test() is used. In case of small cell counts, fisher.test() is used for categorical variables specified (*exact*). kruskal.test() is equivalent to wilcox.test() in the two-group case. The column named test is to indicate which p-values were calculated using the non-default tests.
+
+p-value tests: If there are more than 2 groups, groupwise comparisons are performed.
+
+SMD: The definitions of the standardized mean difference (SMD) are available in [Flury et al 1986](https://www.tandfonline.com/doi/abs/10.1080/00031305.1986.10475403) for the univariate case and the multivariate case (essentially the square root of the Mahalanobis distance). Extension to binary variables is discussed in [Austin 2009](https://www.tandfonline.com/doi/abs/10.1080/03610910902859574) and extension to multinomial variables is suggested in [Yang et al 2012](https://support.sas.com/resources/papers/proceedings12/335-2012.pdf). This multinomial extesion treats a single multinomial variable as multiple non-redundant dichotomous variables and use the Mahalanobis distance. The off diagonal elements of the covariance matrix on page 3 have an error, and need negation. In weighted data, the same definitions can be used except that the mean and standard deviation estimates are weighted estimates ([Li et al 2013](https://pubmed.ncbi.nlm.nih.gov/23902694/) and [Austin et al 2015](https://onlinelibrary.wiley.com/doi/full/10.1002/sim.6607)). In tableone, all weighted estimates are calculated by weighted estimation functions in the survey package.
+
+In case of a >2 group comparison, standardized mean differences for all pairwise comparisons are calculated and means are displayed.
+
 ```{r tableone}
 table1 <- tableone::CreateTableOne(
   data = df,
   vars = names(df)[!names(df) %in% c("sex", "sex2")],
   strata = "sex2",
   includeNA = TRUE,
-  addOverall = TRUE
+  addOverall = FALSE
 )
 
 table1print <- print(
   table1,
   smd = TRUE,
-  test = FALSE,
+  test = TRUE,
   nonnormal = df %>% dplyr::select_if(is.numeric) %>% names(),
   varLabels = TRUE,
   printToggle = FALSE
@@ -134,42 +167,70 @@ source(here::here("functions", "_flextable_default.R"))
 table1final <- table1print %>% 
   flextable_default()
 
-# define word specifications for table 1
-table1_specs <- officer::prop_section(
-  page_size = officer::page_size(orient = "landscape"), type = "continuous"
-  )
-
 table1final %>% 
-  flextable::save_as_docx(path = paste0(path.out,"/table1.docx"), pr_section = table1_specs)
+  flextable::save_as_docx(path = paste0(path.out,"/table1.docx"), 
+                          pr_section = portrait_specs)
+
+table1final
 ```
 
-# SMD plot
+## SMD plot
 
-```{r}
+```{r, smd-plot, fig.path=path.out}
 smd_plot <- data.frame(variable  = rownames(tableone::ExtractSmd(table1)),
                        smd = as.numeric(tableone::ExtractSmd(table1))) %>% 
-  dplyr::mutate(vars_labels = factor(variable, levels = smd)) %>% 
-  dplyr::filter(variable != "ageatadvanceddiagnosisdate") %>% 
-  ggplot2::ggplot(ggplot2::aes(x = variable, y = smd)) +
-  ggplot2::geom_point(size = 1.5) +
+  dplyr::left_join(var_label_mapping, by = "variable") %>% 
+  dplyr::mutate(label = stats::reorder(label, smd)) %>% 
+  ggplot2::ggplot(ggplot2::aes(x = label, y = smd)) +
+  ggplot2::geom_point(size = 2) +
   ggplot2::geom_hline(yintercept = 0.1, color = "red", linetype = "dashed", size = 0.25) +
   ggplot2::coord_flip() +
   ggplot2::labs(y = "SMD", 
                 x = "Patient characteristics", 
-                title = "Balance in patient characteristics across Hgb cohorts") +
+                title = "Balance in patient characteristics across strata") +
   ggplot2::theme_bw() + 
   ggplot2::theme(legend.key = element_blank())
+
+smd_plot
 ```
 
+## Distribution of continuous variables
 
-# Regression tables
+```{r boxplots, path.fig = path.out}
+dist_cont <- function(var){
+    
+  tmp <- df %>% 
+    ggplot2::ggplot(ggplot2::aes(x = factor(sex2), y = .data[[var]])) +
+    ggplot2::geom_boxplot() +
+    ggplot2::labs(x = var, title = var) +
+    ggplot2::theme_bw()
+    
+    return(tmp)
+}
+
+# store all continuous covariates automatically
+cont_covar <- df %>% 
+  dplyr::select_if(is.numeric) %>% 
+  names()
+
+# ... or manually
+cont_covar <- c("time", "ph.karno", "meal.cal", "wt.loss")
+
+cont_plot <- lapply(cont_covar, dist_cont)
+names(cont_plot) <- cont_covar
+cont_plot
+```
+
+# Inference
+
+## Regression tables
 ```{r regression}
 covariates <- names(df)[!names(df) %in% c("sex", "time", "status")] 
 cox_formula <- as.formula(paste0("survival::Surv(time, status) ~ ", paste(covariates, collapse = "+")))
 cox_object <- survival::coxph(cox_formula, data = df)
 ```
 
-```{r regression-output-option-1}
+```{r regression-flextable-output}
 cox_out1 <- cox_object %>% 
   broom::tidy(exponentiate = TRUE, conf.int = TRUE) %>% 
   dplyr::mutate(conf.int = paste0(formatC(conf.low, format="f", 2), 
@@ -179,13 +240,17 @@ cox_out1 <- cox_object %>%
                                   " (",
                                   conf.int,
                                   ")")) %>% 
-  dplyr::select(term, estimate, conf.int, "HR (95% CI)" = summary_estimate) %>% 
+  dplyr::select(term, "HR (95% CI)" = summary_estimate, estimate, conf.int) %>% 
   flextable_default()
 
-conf.int
+cox_out1 %>% 
+  flextable::save_as_docx(path = paste0(path.out,"/regression_flextable_example.docx"), 
+                          pr_section = portrait_specs)
+
+cox_out1
 ```
 
-```{r regression-output-option-2}
+```{r regression-gtsummary-output}
 cox_out2 <- cox_object %>% 
   gtsummary::tbl_regression(exponentiate = TRUE)
   # more can be optionally added such as
@@ -199,11 +264,88 @@ gt::gtsave(gtsummary::as_gt(cox_out2),
 # can also be saved as a more flexible flextable
 cox_out2 %>% 
   gtsummary::as_flex_table() %>% 
+  flextable::fontsize(size = 11, part = "all") %>% 
   flextable::height(height = 0.1, part = "body") %>% 
+  flextable::bold(part = "header") %>% 
   flextable::save_as_docx(path = here::here("output", "cox_example.docx"))
 
 cox_out2
 ```
+
+# PS models
+
+## Manual PS estimation
+```{r}
+# Fit logistic model (exposure model)
+ps_model <- glm(formula = as.formula(paste0("exposure ~ ", 
+                                            paste(covars, collapse = "+"))),
+                family = binomial(link="logit"),
+                data = df)
+
+# Obtain the propensity score for each observation
+ps_manual <- predict(ps_model, df, type="response")
+```
+
+## Caliper matching using `MatchIt` {.tabset}
+
+We match on 0.2 sd of the PS logit ([Austin PC, 2011](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3120982/))
+```{r}
+matching_out <- MatchIt::matchit(as.formula(paste0("exposure ~ ", 
+                                                   paste(covars, collapse = "+"))), 
+                                 data = df,
+                                 method = "nearest",
+                                 replace = FALSE,
+                                 caliper = 0.2,
+                                 distance = boot::logit(ps_manual))
+```
+
+### Covariate balance
+```{r}
+plot(summary(matching_out))
+```
+
+### PS balance
+```{r}
+# extract all
+all_out_df <- MatchIt::match.data(matching_out, 
+                                  distance = "ps", 
+                                  drop.unmatched = FALSE) %>% 
+  dplyr::mutate(matching_indicator = "All")
+
+# extract matched dataset
+matched_out_df <- MatchIt::match.data(matching_out, 
+                                      distance = "ps", 
+                                      drop.unmatched = TRUE) %>% 
+  dplyr::mutate(matching_indicator = "Matched")
+
+ps_overlap <- all_out_df %>% 
+  dplyr::bind_rows(matched_out_df) %>% 
+  ggplot2::ggplot(aes(x = ps, fill = factor(exposure))) +
+  ggplot2::geom_density(alpha = 0.5) +
+  ggplot2::labs(x = "Propensity score (caliper)", 
+                y = "Density") +
+  ggplot2::theme_bw() +
+  facet_grid(~matching_indicator)
+
+ps_overlap
+```
+
+### Outcome model
+
+\textcolor{red}{TO DO: Account for clustering in matched pairs for correct variance estimation}
+
+```{r}
+fit <- stats::glm(stroke_1yr_cat ~ exposure, 
+                  data = matched_out_df, 
+                  family = binomial(link = "logit"))
+
+gtsummary::tbl_regression(fit, exponentiate = TRUE) %>% 
+  gtsummary::as_flex_table()
+```
+
+## PS weighting using `WeightIt` {.tabset}
+
+\textcolor{red}{TO DO: Implement weighting and some more PS methods}
 
 # Session info {.tabset .tabset-pills}
 
