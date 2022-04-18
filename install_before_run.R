@@ -5,6 +5,7 @@ required_packages <- c("tidyverse",
                        "tableone",
                        "flextable",
                        "kableExtra",
+                       "missForest",
                        "gtsummary",
                        "MatchIt",
                        "WeightIt"

@@ -3,12 +3,12 @@ title: "Title"
 author: "Janick Weberpals"
 date: "Last compiled `r Sys.time()` by `r Sys.info()[['user']]`"
 output:
-    html_document:
+  html_document:
     toc: yes
     toc_depth: 3
     toc_float: yes
     number_sections: yes
-    code_folding: show
+    code_folding: hide
     classoption: landscape
     keep_md: true
   pdf_document:
@@ -64,7 +64,7 @@ knitr::include_graphics(here::here(""))
 ```
 
 # Child scripts
-```{r, child = here::here()}
+```{r, eval=FALSE, child = here::here()}
 # if you want to include/compile another Markdown, you can include the child script here
 ```
 
@@ -73,7 +73,8 @@ knitr::include_graphics(here::here(""))
 ## Data formatting
 ```{r pull-data}
 df <- survival::lung %>% 
-  dplyr::mutate(dplyr::across(c(ph.ecog), ~as.factor(.x)))
+  dplyr::mutate(dplyr::across(c(ph.ecog), ~as.factor(.x))) %>% 
+  dplyr::mutate(exposure = factor(stats::rbinom(n = nrow(.), size = 1, prob = 0.4)))
 ```
 
 ```{r factor-vars}
@@ -223,6 +224,13 @@ cont_plot
 
 # Inference
 
+## Imputation model
+
+```{r imputation}
+dfImp <- missForest::missForest(df)$ximp
+```
+
+
 ## Regression tables
 ```{r regression}
 covariates <- names(df)[!names(df) %in% c("sex", "time", "status")] 
@@ -272,18 +280,20 @@ cox_out2 %>%
 cox_out2
 ```
 
-# PS models
+## Propensity score models
 
-## Manual PS estimation
+### Manual PS estimation
 ```{r}
+covars <- c("age", "sex2", "ph.ecog", "ph.karno", "pat.karno", "meal.cal", "wt.loss")
+
 # Fit logistic model (exposure model)
 ps_model <- glm(formula = as.formula(paste0("exposure ~ ", 
                                             paste(covars, collapse = "+"))),
                 family = binomial(link="logit"),
-                data = df)
+                data = dfImp)
 
 # Obtain the propensity score for each observation
-ps_manual <- predict(ps_model, df, type="response")
+ps_manual <- predict(ps_model, dfImp, type="response")
 ```
 
 ## Caliper matching using `MatchIt` {.tabset}
@@ -292,7 +302,7 @@ We match on 0.2 sd of the PS logit ([Austin PC, 2011](https://www.ncbi.nlm.nih.g
 ```{r}
 matching_out <- MatchIt::matchit(as.formula(paste0("exposure ~ ", 
                                                    paste(covars, collapse = "+"))), 
-                                 data = df,
+                                 data = dfImp,
                                  method = "nearest",
                                  replace = FALSE,
                                  caliper = 0.2,
@@ -323,7 +333,8 @@ ps_overlap <- all_out_df %>%
   ggplot2::ggplot(aes(x = ps, fill = factor(exposure))) +
   ggplot2::geom_density(alpha = 0.5) +
   ggplot2::labs(x = "Propensity score (caliper)", 
-                y = "Density") +
+                y = "Density",
+                fill = "Exposure\n(0=Drug A, 1=Drug B)") +
   ggplot2::theme_bw() +
   facet_grid(~matching_indicator)
 
@@ -335,12 +346,11 @@ ps_overlap
 \textcolor{red}{TO DO: Account for clustering in matched pairs for correct variance estimation}
 
 ```{r}
-fit <- stats::glm(stroke_1yr_cat ~ exposure, 
-                  data = matched_out_df, 
-                  family = binomial(link = "logit"))
+cox_formula <- as.formula(survival::Surv(time, status) ~ exposure)
+cox_object <- survival::coxph(cox_formula, data = matched_out_df, cluster = subclass)
 
-gtsummary::tbl_regression(fit, exponentiate = TRUE) %>% 
-  gtsummary::as_flex_table()
+cox_object %>% 
+  gtsummary::tbl_regression(exponentiate = TRUE)
 ```
 
 ## PS weighting using `WeightIt` {.tabset}
