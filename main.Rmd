@@ -65,7 +65,7 @@ knitr::include_graphics(here::here(""))
 
 # Child scripts
 ```{r, eval=FALSE, child = here::here()}
-# if you want to include/compile another Markdown, you can include the child script here
+
 ```
 
 # Data preparation 

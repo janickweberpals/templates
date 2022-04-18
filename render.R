@@ -1,10 +1,7 @@
 # render markdown files
 
-# render scholarship script
-path_in <- here::here("scripts", "scholarship.Rmd")
+# render main script
+path_in <- here::here("main.Rmd")
 
-# report of scholarship (html version)
+# report as index file (html version), ready for publishing
 rmarkdown::render(input = path_in, output_dir = here::here(), output_file = "index", output_format = "html_document")
-
-# .docx version (not really used but useful to have)
-# rmarkdown::render(input = path_in, output_dir = here::here("output"), output_format = "word_document")
